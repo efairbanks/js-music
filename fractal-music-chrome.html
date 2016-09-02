@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="googlebot" content="noindex, nofollow">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.0/jquery.min.js"></script>
+  <style type="text/css">
+  </style>
+  <title></title>
+<script type='text/javascript'>//<![CDATA[
+$(window).on('load', function() {
+// Set up basic sequencing framework
+var BPM = 95;
+
+var BPS = BPM/60;
+
+var tick = 0;
+
+var sixteenth	= 1;
+var eighth		= 2;
+var quarter		= 4;
+var half		= 8;
+var measure		= 16;
+var phrase		= 32;
+var period		= 64;
+var section		= 128;
+
+var eventHandlers = {};
+var preEventHandlers = {};
+
+function setEventHandler(handler, alias, ticks)
+{
+	eventHandlers[alias] = { handler: handler, ticks: ticks };
+	
+	return;
+}
+
+function setPreEventHandler(handler, alias, ticks)
+{
+	preEventHandlers[alias] = { handler: handler, ticks: ticks };
+	
+	return;
+}
+
+// --------------------------- //
+// --- beginning demo code --- //
+// --------------------------- //
+
+function degreeToNote(degree, scale, octave)
+{
+    return scale[degree%scale.length]+(12*(octave+Math.floor(degree/scale.length)));
+}
+
+function flatten(inArray)
+{
+    var flattened = [];
+    flattened = flattened.concat.apply(flattened, inArray);
+    return flattened;
+}
+
+function matrixAdd(cols, rows)
+{
+    var returnMatrix = [];
+    
+    for(var i = 0; i < rows.length; i++)
+    {
+        returnMatrix[i] = [];
+        
+        for(var j = 0; j < cols.length; j++)
+        {
+            returnMatrix[i][j] = rows[i]+cols[j];
+        }
+    }
+    
+    return returnMatrix;
+}
+
+function fillLevels()
+{
+    level1 = eval($('#level1').val());
+    level2 = eval($('#level2').val());
+    level3 = eval($('#level3').val());
+    level4 = eval($('#level4').val());
+    level5 = eval($('#level5').val());
+    
+    // convert from degree to degree index starting at 0
+    for(var i = 0; i < level1.length; i++) level1[i] -= 1;
+    for(var i = 0; i < level2.length; i++) level2[i] -= 1;
+    for(var i = 0; i < level3.length; i++) level3[i] -= 1;
+    for(var i = 0; i < level4.length; i++) level4[i] -= 1;
+    for(var i = 0; i < level5.length; i++) level5[i] -= 1;
+}
+
+function recalculate()
+{
+    fillLevels();
+    seq = flatten(matrixAdd(level5, level4));
+    seq = flatten(matrixAdd(seq, level3));
+    seq = flatten(matrixAdd(seq, level2));
+    seq = flatten(matrixAdd(seq, level1));
+}
+
+$('#recalculate').click(recalculate);
+
+var lastIndex = 0;
+
+var level1 = [];
+var level2 = [];
+var level3 = [];
+var level4 = [];
+var level5 = [];
+
+var seq = [];
+
+recalculate();
+
+var note = 0;
+
+setPreEventHandler(function(unit, tick, ticks){
+    
+    note = degreeToNote((seq[unit%seq.length]%14)+7, [0,2,3,5,7,8,10], 2);
+    
+}, 'noteProcess', sixteenth);
+
+setEventHandler(function(unit, tick, ticks){
+    
+    audiogenerator.highChimes.playnote((note%12)+48+(24/((unit%2)+1)),0.035,4);
+    
+}, 'quarter', half);
+
+setEventHandler(function(unit, tick, ticks){
+    
+    audiogenerator.midChimes.playnote(note+12,0.075,0.75);
+    
+}, 'sixteenth', sixteenth);
+
+setEventHandler(function(unit, tick, ticks){
+    
+    audiogenerator.bassChimes.playnote((note%12)+24,0.15,4);
+    
+}, 'half', measure);
+
+// --------------------------- //
+// --- finishing demo code --- //
+// --------------------------- //
+
+setInterval(function(){
+	
+	for(handler in preEventHandlers)
+	{
+		if(tick%preEventHandlers[handler].ticks==0)
+			preEventHandlers[handler].handler(	Math.floor(tick/preEventHandlers[handler].ticks),
+											tick,
+											preEventHandlers[handler].ticks);
+	}
+	
+	for(handler in eventHandlers)
+	{
+		if(tick%eventHandlers[handler].ticks==0)
+			eventHandlers[handler].handler(	Math.floor(tick/eventHandlers[handler].ticks),
+											tick,
+											eventHandlers[handler].ticks);
+	}
+    
+    tick = tick + 1;
+    
+},(1000/BPS)/4);
+
+// --- //
+
+function SinOsc (frequency,amplitude)
+{
+	
+	this.freq = frequency;
+	this.amp =  amplitude;
+	this.delta = 0;
+	
+	this.process = function(samplerate)
+	{
+		
+		var out = Math.sin(this.delta*2*Math.PI)
+		
+		this.delta = this.delta + (this.freq/samplerate);
+		
+		return out;
+		
+	};
+	
+	this.set = function(frequency,amplitude)
+	{
+		
+		this.freq	= frequency;
+		this.amp	= amplitude;
+		
+	};
+	
+}
+
+function Line (from,to,duration)
+{
+	
+	this.delta = -1;
+	
+	this.f = from;
+	
+	this.t = to;
+	
+	this.dur = duration;
+	
+	this.process = function(samplerate)
+	{
+		
+		var out = 0;
+		
+		if(this.delta > -1)
+		{
+		
+			out = ((this.t*this.delta)/this.dur) + ((this.f*(this.dur-this.delta))/this.dur);
+		
+			this.delta  = this.delta + (1/samplerate);
+		
+			if(this.delta>this.dur + (1/samplerate)) this.delta = -1;
+		
+		} else {
+			
+			out = 0;
+			
+		}
+		
+		return out;
+		
+	}
+	
+	this.reset = function(duration)
+	{
+		
+		this.dur = duration;
+		
+		this.delta = 0;
+		
+	}
+	
+}
+
+function Pulse (frequency,amplitude,pulsewidth)
+{
+	
+	this.freq = frequency;
+	
+	this.amp = amplitude;
+	
+	this.pw = pulsewidth;
+	
+	this.delta = 0;
+	
+	this.process = function(samplerate)
+	{
+		
+		var out = 0;
+		
+		if(this.delta+(this.freq/samplerate) < this.pw){
+			
+			out = this.amp;
+			
+		} else {
+			
+			out = -this.amp;
+			
+		}
+		
+		this.delta = this.delta + (this.freq/samplerate);
+		
+		while(this.delta>1) this.delta = this.delta - 1;
+		
+		return out;
+		
+	};
+	
+	this.set = function(frequency,amplitude,pulsewidth)
+	{
+		
+		this.freq	= frequency;
+		this.amp	= amplitude;
+		this.pw		= pulsewidth;
+		
+	};
+	
+}
+
+function Delay (delayinseconds,feedbackcoefficient)
+{
+	
+	this.buffer = [];
+	
+	this.delaysec = delayinseconds;
+	
+	this.head = 0;
+	
+	this.fcoef = feedbackcoefficient;
+	
+	this.process = function (signalinput,samplerate)
+	{
+		
+		var out = 0;
+		
+		if(this.buffer[this.head]){
+		
+			out = (this.buffer[this.head])+signalinput;
+			
+		} else {
+			
+			out = signalinput;
+			
+		}
+		
+		this.buffer[this.head] = out*this.fcoef;
+		
+		this.head = this.head+1;
+		
+		while( this.head > samplerate*this.delaysec ) this.head -= samplerate*this.delaysec;
+		
+		return out;
+		
+	}
+	
+}
+
+function Chime ()
+{
+	
+	this.delta	= -1;
+	this.note	= 60;
+	this.dur	= 0.5;
+	this.amp	= 0.5;
+	
+	this.vib	= new SinOsc(10,1);
+	this.osc	= new Pulse(440,0.5,0.5);
+	this.env	= new Line(1,0,0.5);
+	
+	this.playnote = function (midinote,amplitude,duration)
+	{
+		
+		this.note 	= midinote;
+		this.amp	= amplitude;
+		this.dur	= duration;
+		
+		this.osc.set(Math.pow(2,(this.note-57)/12)*440,this.amp,0.5);
+		
+		this.env.reset(this.dur);
+		
+	};
+	
+	this.process = function (samplerate)
+	{
+		
+		var out = 0;
+		
+		if(this.osc && this.env){
+		
+			var envn = this.env.process(samplerate);
+			
+			this.osc.pw = (1-envn)/2+0.5;
+			
+			this.osc.freq = (Math.pow(2,(this.note-57)/12)*440);
+			
+			out = this.osc.process(samplerate)*envn;
+			
+		}
+		
+		return [out,out];
+		
+	};
+	
+}
+
+function Chimes ()
+{
+	
+	this.chimes = [];
+	
+	this.voice = 0
+	
+	this.numVoices = 6;
+    
+    //this.lDelay	= new Delay(0.5,0.75);
+    //this.rDelay	= new Delay(0.6,0.75);
+	
+	for(var i=0; i<this.numVoices; i++) this.chimes[i] = new Chime();
+	
+	this.playnote = function (midinote,amplitude,duration)
+	{
+		
+		this.chimes[this.voice].playnote(midinote,amplitude,duration);
+		
+		this.voice = (this.voice+1)%this.numVoices;
+		
+	};
+	
+	this.process = function (samplerate)
+	{
+		
+		var out;
+		
+		var outl = 0;
+		var outr = 0;
+		
+		for(var i = 0; i < this.numVoices; i++){
+			
+			out = this.chimes[i].process(samplerate);
+            
+			outl = outl + out[0];
+			outr = outr + out[1];
+            
+            //outl = outl + (this.lDelay.process(outl,samplerate)/8);
+            //outr = outr + (this.rDelay.process(outr,samplerate)/8);
+			
+		}
+		
+		outl = outl/3;
+		outr = outr/3;
+		
+		return [outl,outr];
+		
+	};
+	
+}
+
+var audiogenerator = {};
+
+audiogenerator['highChimes'] = new Chimes();
+audiogenerator['midChimes'] = new Chimes();
+audiogenerator['bassChimes'] = new Chimes();
+
+// --- //
+
+var context = new webkitAudioContext();  
+
+window.onProcess = function(e) {
+    //var leftIn = e.inputBuffer.getChannelData(0);
+    //var rightIn = e.inputBuffer.getChannelData(1);
+    var lOut = e.outputBuffer.getChannelData(0);
+    var rOut = e.outputBuffer.getChannelData(1);
+    
+    for (var i = 0; i < lOut.length; i++) {
+        
+        var frameL = 0;
+        var frameR = 0;
+        
+        for(generator in audiogenerator)
+        {
+            var frame = audiogenerator[generator].process(44100)
+            
+            frameL += frame[0];
+            frameR += frame[1];
+        }
+        
+        lOut[i] = frameL;
+        rOut[i] = frameR;
+        
+    }
+    
+};
+
+// Hook it up to a ScriptProcessorNode.
+var processor = context.createScriptProcessor(2048);
+processor.onaudioprocess = window.onProcess;
+
+//source.connect(processor);
+window.process = processor.connect(context.destination);
+
+// --- //
+
+});//]]> 
+
+</script>
+
+  
+</head>
+
+<body>
+  Level 1<input type="text" id="level1" value="[1]" /><br />
+Level 2<input type="text" id="level2" value="[1]" /><br />
+Level 3<input type="text" id="level3" value="[8,11,13,12,10,6,7,5]" /><br />
+Level 4<input type="text" id="level4" value="[1,3,7,5]" /><br />
+Level 5<input type="text" id="level5" value="[1,3,5,8,7,5,3,5]" /><br />
+<button id="recalculate">Recalculate</button>
+  
+</body>
+
+</html>
+
+
